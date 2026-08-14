@@ -1,0 +1,6 @@
+node_modules
+.DS_Store
+
+# career リポジトリへの symlink（参照専用・Zenn には渡さない）
+技術メモ
+技術書読書メモ
