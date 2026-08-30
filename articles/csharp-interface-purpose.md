@@ -224,7 +224,7 @@ public void NotifyCompletion(INotifier notifier)
 - 各メリットについて、インターフェースを利用しない場合と比較する
 -->
 
-ここまで、インターフェースが利用側と実装側の間に置かれた契約であることを説明しました。では、利用側が具象クラスではなくインターフェースに依存すると、何が嬉しいのでしょうか。この章では、インターフェースによって何を実現できるのかを、利用しない場合と比較しながら一つずつ見ていきます。
+ここまで、インターフェースが利用側と実装側の間に置かれた契約であることを説明しました。では、利用側が具象クラスではなくインターフェースに依存すると、何が嬉しいのでしょうか。この章では、インターフェースを利用するメリットを、利用しない場合と比較しながら見ていきます。
 
 ### ポリモーフィズムによって実装ごとの条件分岐を利用側からなくせる
 
@@ -237,41 +237,61 @@ public void NotifyCompletion(INotifier notifier)
 - 実装を選択する処理自体は、利用側の外に残る
 -->
 
-典型的な利用例として、ECサイトの支払い処理を考えます。ECサイトには、クレジットカードや銀行振込など、複数の支払い方法があります。支払い方法ごとに処理内容は異なりますが、チェックアウト処理から見れば、いずれも注文金額を支払うための処理です。
+典型的な利用例として、ECサイトの支払い処理を考えます。ECサイトには、クレジットカードや銀行振込など、複数の支払い方法があります。これらを扱う処理が、インターフェースを利用しない場合と利用する場合でどのように変わるかを見ていきます。
 
 まず、インターフェースを利用していないコードを確認し、その問題をインターフェースによってどのように改善できるかを見ていきます。
 
 **インターフェースを利用しない場合**
 
-インターフェースを用意せず、`CheckoutService`が支払い方法の具象クラスを直接利用する場合、`CheckoutService`自身が支払い方法を判定し、それぞれの具象クラスを呼び分ける必要があります。
+ここでは、在庫の確認から注文の確定までを担うクラスを`CheckoutService`とします。支払い方法ごとに処理内容は異なりますが、注文を受け付ける`CheckoutService`から見れば、いずれも注文金額を支払うための処理です。クレジットカードで支払うか、銀行振込で支払うかまで、`CheckoutService`が意識する必要は本来ありません。
+
+しかし、インターフェースを用意せず、`CheckoutService`が支払い方法の具象クラスを直接利用する場合、`CheckoutService`自身が支払い方法を判定し、それぞれの具象クラスを呼び分けることになるでしょう。
 
 ```cs
-// 説明に必要な部分だけを抜粋
-public void Checkout(decimal orderTotal, PaymentType paymentType)
+public class CheckoutService
 {
-    // 在庫の確認や注文データの作成（処理は省略）
+    private readonly CreditCardPaymentMethod _creditCardPaymentMethod;
+    private readonly BankTransferPaymentMethod _bankTransferPaymentMethod;
 
-    if (paymentType == PaymentType.CreditCard)
-        _creditCardPaymentMethod.Pay(orderTotal);
-    else if (paymentType == PaymentType.BankTransfer)
-        _bankTransferPaymentMethod.Pay(orderTotal);
+    public CheckoutService(
+        CreditCardPaymentMethod creditCardPaymentMethod,
+        BankTransferPaymentMethod bankTransferPaymentMethod)
+    {
+        _creditCardPaymentMethod = creditCardPaymentMethod;
+        _bankTransferPaymentMethod = bankTransferPaymentMethod;
+    }
 
-    // 注文の確定（処理は省略）
+    public void Checkout(decimal orderTotal, PaymentType paymentType)
+    {
+        // ① 在庫の確認や注文データの作成（処理は省略）
+
+        // ② 支払い処理
+        if (paymentType == PaymentType.CreditCard)
+            _creditCardPaymentMethod.Pay(orderTotal);
+        else if (paymentType == PaymentType.BankTransfer)
+            _bankTransferPaymentMethod.Pay(orderTotal);
+
+        // ③ 注文の確定（処理は省略）
+    }
 }
 ```
 
-`CheckoutService`の中に、支払い方法ごとの条件分岐が入り込んでいます。今は2種類だけなので、それほど問題には見えないかもしれません。しかし、支払い方法が増えれば、この条件分岐も長くなります。また、同じような条件分岐が`CheckoutService`だけでなく、アプリケーションの複数箇所に書かれる可能性もあります。その場合、支払い方法を追加するたびにすべての箇所を確認して変更しなければならず、保守しづらくなります。
+`Checkout`メソッド内に、支払い方法ごとの条件分岐が入り込んでいます。今は支払い方法が2種類だけなので、それほど問題には見えないかもしれません。しかし、支払い方法が増えれば、この条件分岐も長くなります。
+
+また、支払い方法に応じて処理を分ける必要があるのは、`Checkout`メソッドだけとは限りません。アプリケーション内の別の処理でも支払い方法による処理分けが必要になれば、その利用側にも同じような条件分岐が書かれます。このように、利用側が支払い方法を判定する形では、アプリケーションのあちこちに同じような条件分岐が増えていきます。その場合、支払い方法を追加するたびにすべての分岐箇所を確認して変更しなければならず、保守しづらくなります。
 
 **インターフェースを利用する場合**
 
-そこで、支払い方法に共通する契約を`IPaymentMethod`として定めます。
+そこで、支払い方法に共通する契約を`IPaymentMethod`として定めます。`IPaymentMethod`は支払うためのメソッド`Pay`のみを持つシンプルなインターフェースです。
 
 ```cs
+// インターフェース
 public interface IPaymentMethod
 {
     void Pay(decimal amount);
 }
 
+// インターフェースを実装する具象クラス①: クレジットカード支払い
 public class CreditCardPaymentMethod : IPaymentMethod
 {
     public void Pay(decimal amount)
@@ -280,6 +300,7 @@ public class CreditCardPaymentMethod : IPaymentMethod
     }
 }
 
+// インターフェースを実装する具象クラス②: 銀行振込支払い
 public class BankTransferPaymentMethod : IPaymentMethod
 {
     public void Pay(decimal amount)
@@ -289,27 +310,28 @@ public class BankTransferPaymentMethod : IPaymentMethod
 }
 ```
 
-`CreditCardPaymentMethod`と`BankTransferPaymentMethod`は異なるクラスですが、どちらも`IPaymentMethod`を実装しているため、どちらのオブジェクトも`IPaymentMethod`型として扱えます。そのため、`CheckoutService`は支払い方法を`IPaymentMethod`として受け取り、次のように利用できます。
+`CreditCardPaymentMethod`と`BankTransferPaymentMethod`は異なるクラスですが、どちらも`IPaymentMethod`を実装しているため、どちらのオブジェクトも`IPaymentMethod`型として扱えます。そのため、`CheckoutService`はこれらの具象クラスに依存せず、支払い方法を`IPaymentMethod`として受け取って利用できます。
 
 ```cs
 public class CheckoutService
 {
     public void Checkout(decimal orderTotal, IPaymentMethod paymentMethod)
     {
-        // 在庫の確認や注文データの作成（処理は省略）
+        // ① 在庫の確認や注文データの作成（処理は省略）
 
+        // ② 支払い処理
         paymentMethod.Pay(orderTotal);
 
-        // 注文の確定（処理は省略）
+        // ③ 注文の確定（処理は省略）
     }
 }
 ```
 
-`CheckoutService`は、実際の支払い方法がクレジットカードなのか銀行振込なのかを判定せず、`Pay()`を呼び出すだけです。実際に実行される処理は、渡された具象クラスによって変わります。このように、異なる型を共通の型として扱い、実際の型に応じた処理を実行する仕組みをポリモーフィズムと呼びます。
+`CheckoutService`は、実際の支払い方法がクレジットカードなのか銀行振込なのかを判定せず、`Pay()`を呼び出すだけです。それでも、`paymentMethod`の実体が`CreditCardPaymentMethod`ならクレジットカードによる支払い処理、`BankTransferPaymentMethod`なら銀行振込による支払い処理が実行されます。このように、同じメソッドを呼び出しても、そのメソッドを呼び出すオブジェクトの種類によって異なる動作をする仕組みをポリモーフィズムと呼びます。
 
-これにより、支払い方法ごとの条件分岐が支払い方法を利用する`CheckoutService`からなくなりました。他の利用側も`IPaymentMethod`を受け取るようにすれば、同じような条件分岐がアプリケーションのあちこちに増えていくことを防げます。
+これにより、支払い方法ごとの条件分岐が`CheckoutService`からなくなり、`CheckoutService`が依存するのは`IPaymentMethod`だけになりました。他の利用側も`IPaymentMethod`を受け取るようにすれば、同じような条件分岐がアプリケーションのあちこちに増えていくことを防げます。
 
-どの支払い方法を使うか決める処理自体は必要です。しかし、その判断は、利用者の選択を受け取って使用する支払い方法を決める側の責務です。`CheckoutService`の責務は、在庫の確認から注文の確定までの流れを進めることであり、どの支払い方法を使うかを判定することではありません。両者を分けることで、`CheckoutService`はチェックアウト処理だけに集中できます。
+どの支払い方法を使うか決める処理自体は必要です。しかし、その判断は、利用者の選択を受け取って使用する支払い方法を決める側の責務です。`CheckoutService`の責務は、在庫の確認から注文の確定までの流れを進めることであり、どの支払い方法を使うかを判定することではありません。両者を分けることで、`CheckoutService`は注文処理だけに集中できます。
 
 ### 新しい実装の種類を増やしやすい
 
@@ -318,12 +340,11 @@ public class CheckoutService
 - QrCodePaymentMethodを追加する例
 - 既存のIPaymentMethodを実装する具象クラスを追加する
 - 支払い機能を利用する側は変更しない
-- どの実装を使うか決める箇所には追加が必要
 -->
 
 これは、前節で説明したメリットを、実装を追加する場面から言い換えたものです。利用側が具象クラスではなくインターフェースに依存しているため、新しい実装を増やしても利用側を変更せずに済みます。
 
-クレジットカードや銀行振込のほかに、QRコード決済が追加されることになったとします。インターフェースを利用している場合は、`IPaymentMethod`を実装するクラスを新しく用意します。
+たとえば、クレジットカードや銀行振込のほかに、QRコード決済が追加されることになったとします。インターフェースを利用している場合は、`IPaymentMethod`を実装するクラスを新しく用意します。
 
 ```cs
 public class QrCodePaymentMethod : IPaymentMethod
@@ -335,7 +356,7 @@ public class QrCodePaymentMethod : IPaymentMethod
 }
 ```
 
-既存の`IPaymentMethod`を実装する具象クラスを追加すれば、`CheckoutService`など支払い機能を利用する側のコードには手を加える必要がありません。変更が必要なのは、QRコード決済の実装と、どの支払い方法を使用するか決める箇所です。
+既存の`IPaymentMethod`を実装する具象クラスを追加すれば、`CheckoutService`など支払い機能を利用する側のコードには手を加える必要がありません。
 
 **インターフェースを利用しない場合**
 
@@ -357,9 +378,9 @@ public class QrCodePaymentMethod : IPaymentMethod
  }
 ```
 
-新しい支払い方法を追加するたびに利用側も変更することになり、変更箇所が広がりやすくなります。同じような条件分岐が複数箇所にあれば、そのすべてへQRコード決済の分岐を追加しなければなりません。一部の分岐を修正し忘れても、既存のコードはそのまま成立するため、コンパイルエラーでは気づけないことがあります。また、既存の条件分岐を書き換えるため、誤ってクレジットカード決済や銀行振込の処理に影響を与える可能性もあります。
+新しい支払い方法を追加するたびに利用側も変更することになり、変更箇所が広がりやすくなります。同じような支払い方法による条件分岐が複数箇所にあれば、そのすべてへQRコード決済の分岐を追加しなければなりません。また、既存の条件分岐を書き換えるため、誤ってクレジットカード決済や銀行振込の処理に影響を与える可能性もあります。
 
-利用側が`IPaymentMethod`に依存していれば、新しい支払い方法を追加しても利用側を変更する必要がありません。変更範囲を新しい実装と、使用する支払い方法を決める箇所に限定できるため、修正漏れや既存機能への影響を防ぎやすくなります。
+利用側が`IPaymentMethod`に依存していれば、新しい支払い方法を追加しても利用側を変更する必要がありません。利用側へ変更が広がらないため、新しい実装を追加しやすくなります。
 
 ### 実装漏れをコンパイルエラーで防げる
 
@@ -370,7 +391,7 @@ public class QrCodePaymentMethod : IPaymentMethod
 - 前節の条件分岐では修正漏れをコンパイル時に検出できないことと短く対比する
 -->
 
-前節では、`IPaymentMethod`を実装する`QrCodePaymentMethod`を追加しました。このとき、契約に定められた`Pay()`を実装し忘れると、コンパイルエラーになります。
+前節では、`IPaymentMethod`を実装する`QrCodePaymentMethod`を追加しました。このとき、契約に定められた`Pay()`を実装し忘れると、コンパイルエラーになります。インターフェースを実装するクラスには、契約に定められたメンバーの実装が強制されるためです。
 
 ```cs
 // Pay()を実装していないため、コンパイルエラーになる
@@ -379,7 +400,9 @@ public class QrCodePaymentMethod : IPaymentMethod
 }
 ```
 
-`IPaymentMethod`を実装すると宣言した以上、`QrCodePaymentMethod`は契約に含まれるすべてのメンバーを提供しなければなりません。利用側に条件分岐を書く構成では、新しい分岐を追加し忘れてもコンパイルできてしまいました。インターフェースを利用する構成では利用側にその分岐はなく、実装側で必要な操作が欠けていればコンパイルエラーになります。
+インターフェースを利用しない元のコードでは、利用側に支払い方法の条件分岐が増えていきます。新しい支払い方法を追加するたびにすべての分岐を修正する必要がありますが、一部を修正し忘れてもコードとしては成立するため、コンパイルエラーでは気づけません。ここでは説明のために単純な例を示していますが、実際のアプリケーションで分岐が増えるほど、修正箇所を把握して漏れなく対応するのは難しくなり、実装漏れのリスクも高まります。
+
+インターフェースを利用すると、利用側から支払い方法ごとの条件分岐そのものがなくなります。さらに、新しい具象クラスには`IPaymentMethod`の実装が強制されるため、必要な`Pay()`を実装し忘れればコンパイルエラーになります。人がすべての条件分岐を探して修正するのではなく、新しい具象クラスが契約を満たしているかをコンパイラに検査させられるため、実装漏れを仕組みとして防ぎやすくなります。
 
 ### 実装を差し替えやすい
 
