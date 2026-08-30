@@ -408,11 +408,99 @@ public class QrCodePaymentMethod : IPaymentMethod
 
 <!--
 - IStorageServiceを例にする
-- LocalStorageService、S3StorageService、AzureBlobStorageServiceを用意する
+- LocalStorageServiceとS3StorageServiceを用意する
+- Azure Blob Storageなどへの変更も同じ考え方でできる
 - 開発環境と本番環境、利用するクラウドサービスの変更などに応じて実装を差し替えられる
 - DocumentServiceはIStorageServiceだけに依存するため変更しない
 - インターフェースを利用しない場合、DocumentServiceが具象クラスへ直接依存する
+- 差し替えやすさは、利用側が具象クラスに依存していないことで得られる
+- ログの出力先や外部APIの接続処理も差し替えの例になる
 -->
+
+インターフェースを利用すると、利用側を変更せずに実装を差し替えやすくなります。ここでは、アップロードされた文書の保存先を例に考えます。開発環境ではローカルへ保存し、本番環境ではAmazon S3へ保存したいとします。
+
+まず、ファイルを保存するための契約を`IStorageService`として定めます。ローカルへ保存するクラスとS3へ保存するクラスは、どちらもこのインターフェースを実装します。
+
+```cs
+public interface IStorageService
+{
+    void Save(string fileName, byte[] content);
+}
+
+public class LocalStorageService : IStorageService
+{
+    public void Save(string fileName, byte[] content)
+    {
+        // ローカルディスクへ保存する処理
+    }
+}
+
+public class S3StorageService : IStorageService
+{
+    public void Save(string fileName, byte[] content)
+    {
+        // Amazon S3へ保存する処理
+    }
+}
+```
+
+文書を扱う`DocumentService`は、具体的な保存先ではなく`IStorageService`に依存します。
+
+```cs
+public class DocumentService
+{
+    private readonly IStorageService _storageService;
+
+    public DocumentService(IStorageService storageService)
+    {
+        _storageService = storageService;
+    }
+
+    public void Upload(string fileName, byte[] content)
+    {
+        _storageService.Save(fileName, content);
+    }
+}
+```
+
+`DocumentService`が知っているのは、`Save()`を呼び出せばファイルを保存できるという契約だけです。実際にローカルへ保存するのか、S3へ保存するのかは知りません。
+
+そのため、`DocumentService`へ渡す具象クラスを変えるだけで、保存先を切り替えられます。
+
+```diff cs
+-IStorageService storageService = new LocalStorageService();
++IStorageService storageService = new S3StorageService();
+ DocumentService documentService = new DocumentService(storageService);
+```
+
+差し替える前後のクラスは、どちらも`IStorageService`の契約を満たしています。`DocumentService`が依存する契約は変わらないため、`DocumentService`自体を修正する必要はありません。将来、保存先をAzure Blob Storageへ変更する場合も、`IStorageService`を実装する新しい具象クラスを用意すれば、`DocumentService`はそのまま利用できます。
+
+**インターフェースを利用しない場合**
+
+一方、インターフェースを利用せず、`DocumentService`が`LocalStorageService`へ直接依存するコードは次のようになります。
+
+```cs
+public class DocumentService
+{
+    private readonly LocalStorageService _storageService;
+
+    public DocumentService(LocalStorageService storageService)
+    {
+        _storageService = storageService;
+    }
+
+    public void Upload(string fileName, byte[] content)
+    {
+        _storageService.Save(fileName, content);
+    }
+}
+```
+
+保存先をS3へ変更するには、`DocumentService`が依存する型を`S3StorageService`へ書き換えなければなりません。保存先の変更が、それを利用する`DocumentService`の変更にまで及んでしまいます。
+
+インターフェースを間に置けば、利用側は変わらない契約に依存したまま、その契約を満たす実装だけを差し替えられます。このメリットが得られるのは、利用側が`LocalStorageService`や`S3StorageService`といった具象クラスに依存せず、`IStorageService`にだけ依存しているためです。
+
+同じ考え方は、開発環境ではコンソール、本番環境では外部のログ監視サービスへログを出力する場合にも使えます。また、外部APIへ接続するクラスを、テスト時だけモックへ差し替えることもできます。このように、環境ごとに処理を使い分ける場合や、利用する外部サービスを変更する場合に、実装を差し替えやすいというメリットが役立ちます。
 
 ### テストしやすい
 
