@@ -232,7 +232,7 @@ public void NotifyCompletion(INotifier notifier)
 - ECサイトの支払い処理を例にする
 - IPaymentMethodはPay()を契約として定める
 - CreditCardPaymentMethodとBankTransferPaymentMethodは、それぞれ異なる処理を実装する
-- CheckoutServiceはIPaymentMethodだけを受け取り、Pay()を呼び出す
+- CheckoutServiceはコンストラクターでIPaymentMethodを受け取り、Pay()を呼び出す
 - 実装ごとの条件分岐がCheckoutServiceからなくなる
 - 実装を選択する処理自体は、利用側の外に残る
 -->
@@ -315,23 +315,30 @@ public class BankTransferPaymentMethod : IPaymentMethod
 ```cs
 public class CheckoutService
 {
-    public void Checkout(decimal orderTotal, IPaymentMethod paymentMethod)
+    private readonly IPaymentMethod _paymentMethod;
+
+    public CheckoutService(IPaymentMethod paymentMethod)
+    {
+        _paymentMethod = paymentMethod;
+    }
+
+    public void Checkout(decimal orderTotal)
     {
         // ① 在庫の確認や注文データの作成（処理は省略）
 
         // ② 支払い処理
-        paymentMethod.Pay(orderTotal);
+        _paymentMethod.Pay(orderTotal);
 
         // ③ 注文の確定（処理は省略）
     }
 }
 ```
 
-`CheckoutService`は、実際の支払い方法がクレジットカードなのか銀行振込なのかを判定せず、`Pay()`を呼び出すだけです。それでも、`paymentMethod`の実体が`CreditCardPaymentMethod`ならクレジットカードによる支払い処理、`BankTransferPaymentMethod`なら銀行振込による支払い処理が実行されます。このように、同じメソッドを呼び出しても、そのメソッドを呼び出すオブジェクトの種類によって異なる動作をする仕組みをポリモーフィズムと呼びます。
+`CheckoutService`は、実際の支払い方法がクレジットカードなのか銀行振込なのかを判定せず、`Pay()`を呼び出すだけです。それでも、コンストラクターで渡されたオブジェクトが`CreditCardPaymentMethod`ならクレジットカードによる支払い処理、`BankTransferPaymentMethod`なら銀行振込による支払い処理が実行されます。このように、同じメソッドを呼び出しても、そのメソッドを呼び出すオブジェクトの種類によって異なる動作をする仕組みをポリモーフィズムと呼びます。
 
 これにより、支払い方法ごとの条件分岐が`CheckoutService`からなくなり、`CheckoutService`が依存するのは`IPaymentMethod`だけになりました。他の利用側も`IPaymentMethod`を受け取るようにすれば、同じような条件分岐がアプリケーションのあちこちに増えていくことを防げます。
 
-どの支払い方法を使うか決める処理自体は必要です。しかし、その判断は、利用者の選択を受け取って使用する支払い方法を決める側の責務です。`CheckoutService`の責務は、在庫の確認から注文の確定までの流れを進めることであり、どの支払い方法を使うかを判定することではありません。両者を分けることで、`CheckoutService`は注文処理だけに集中できます。
+どの支払い方法を使うか決める処理自体は必要です。しかし、その判断は、利用者の選択を受け取って使用する支払い方法を決める側の責務です。インターフェースを利用しない例では`Checkout()`が`PaymentType`を受け取っていましたが、ここでは外部で選ばれた`IPaymentMethod`をコンストラクターで受け取ります。`CheckoutService`の責務は、在庫の確認から注文の確定までの流れを進めることであり、どの支払い方法を使うかを判定することではありません。両者を分けることで、`CheckoutService`は注文処理だけに集中できます。
 
 ### 新しい実装の種類を増やしやすい
 
@@ -509,8 +516,48 @@ public class DocumentService
 - 実際の決済を行わずにCheckoutServiceをテストできる
 - テスト用の実装もIPaymentMethodの契約を満たす
 - 差し替えやすさと同じ仕組みから得られる、テスト上の効果として説明する
-- インターフェースを利用しない場合、実際の決済を避けるための対応が別途必要になる
+- CheckoutServiceが決済の具象クラスに依存していないため、テスト用の実装を渡せる
+- インターフェースを利用しない場合、支払い処理を切り離してCheckoutServiceだけをテストできない
 -->
+
+実装を差し替えやすいことは、テストのしやすさにもつながります。`CheckoutService`をテストするときに、クレジットカード会社のシステムへ接続して実際の決済を行うわけにはいきません。そこで、実際の決済を行わないテスト用の実装を用意します。
+
+実際の開発では、Moqなどのモックライブラリにインターフェースを指定し、その契約を満たすテスト用オブジェクトを作ることも一般的です。ここでは、実装を差し替えていることが分かりやすいように`FakePaymentMethod`を手書きします。
+
+```cs
+public class FakePaymentMethod : IPaymentMethod
+{
+    public decimal PaidAmount { get; private set; }
+
+    public void Pay(decimal amount)
+    {
+        PaidAmount = amount;
+    }
+}
+```
+
+`FakePaymentMethod`も`IPaymentMethod`の契約を満たしています。`CheckoutService`は`CreditCardPaymentMethod`などの具象クラスではなく`IPaymentMethod`に依存しているため、本番用の実装と同じように、このテスト用の実装を渡せます。
+
+```cs
+[Fact]
+public void Checkout_注文金額で支払う()
+{
+    var paymentMethod = new FakePaymentMethod();
+    var checkoutService = new CheckoutService(paymentMethod);
+
+    checkoutService.Checkout(5_000m);
+
+    Assert.Equal(5_000m, paymentMethod.PaidAmount);
+}
+```
+
+本番用の実装をテスト用の実装へ差し替えられるため、外部のシステムやネットワークの状態に左右されず、`CheckoutService`の処理だけをテストできます。
+
+**インターフェースを利用しない場合**
+
+`CheckoutService`が具象クラスへ直接依存している場合、クレジットカード支払いの経路をテストするにも、本物の`CreditCardPaymentMethod`を使うことになります。すると、`Pay()`から外部通信へ処理が進みます。設定や認証情報がなく途中でエラーになるかもしれませんし、実際に外部へ通信してしまうかもしれません。いずれにしても、このままテストを実行するのは適切ではありません。
+
+そこで、先ほど用意したテスト用の`FakePaymentMethod`を代わりに渡したいところですが、`CheckoutService`が要求しているのは`CreditCardPaymentMethod`です。両者は異なる型なので、`FakePaymentMethod`を渡すことはできません。`CheckoutService`と支払い処理が具象クラスによって密接につながっており、両者を切り離して`CheckoutService`だけを単体テストすることができません。
 
 ### 異なる型に共通の役割を持たせられる
 
