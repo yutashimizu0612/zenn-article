@@ -21,7 +21,7 @@ published: false
 
 ### サンプルコードについて
 
-この記事のサンプルコードは、インターフェースの使われ方を説明するために作成したものです。特定のアプリケーションのコードを引用したものではなく、説明に必要な要素だけに単純化しています。
+この記事のサンプルコードは、インターフェースの使われ方を説明するために作成したものです。一部は実際のアプリケーションの実装を参考にし、必要な要素だけに単純化しています。
 
 ## インターフェースとは
 
@@ -562,13 +562,144 @@ public void Checkout_注文金額で支払う()
 ### 異なる型に共通の役割を持たせられる
 
 <!--
-- IStoreRestrictedを例にする
-- ProductとBlogPostがIStoreRestrictedを実装する
-- 利用側は具体的な型ではなく、ストア制限という共通の役割だけを見る
-- クラス継承とは別に役割を持たせられる
-- 一つのクラスが複数のインターフェースを実装できることにも触れる
-- インターフェースを利用しない場合、型ごとの処理や共通基底クラスが必要になる
+- IAuditable、IPublishable、IExpirableで、それぞれ独立した契約を表す
+- Announcementは三つ、BlogPostは二つ、Customerは一つを実装する
+- 各クラスは必要な契約だけを実装する
+- 利用側は作成・更新日時の記録、公開開始や期限切れの判定に必要な契約だけを見る
+- インターフェースを実装するだけでは日時は設定されない
+- クラスの多重継承との違いと、共通基底クラスへまとめた場合の制約を短く説明する
 -->
+
+C#では、一つのクラスが複数のクラスを継承することはできません（多重継承不可）。一方、一つのクラスが複数のインターフェースを実装することは可能です。つまり、インターフェースを使えば、一つのクラスに複数の役割や能力を持たせられます。これは、ここまでに見てきた具象実装を切り替える使い方とは少し異なります。
+
+例として、お知らせ、ブログ記事、顧客の情報を管理するアプリケーションを考えてみます。いずれも作成・更新日時を記録しますが、お知らせとブログ記事には予約公開のための公開開始日時も必要です。さらに、お知らせには掲載を終了する有効期限も設定するものとします。
+
+お知らせ、ブログ記事、顧客は、それぞれ異なる目的を持つ別のクラスです。しかし、日時を記録する処理から見ると、いずれも「作成・更新日時を記録する対象」という共通の役割を持っています。その役割を`IAuditable`として表します。公開開始日時、有効期限についても別々の契約として定義し、それぞれを必要とするクラスが実装します。
+
+**インターフェース側**
+
+```cs
+// 作成・更新日時を記録する
+public interface IAuditable
+{
+    DateTime CreatedAt { get; set; }
+    DateTime UpdatedAt { get; set; }
+}
+
+// 公開開始日時を指定する
+public interface IPublishable
+{
+    DateTime PublishAt { get; set; }
+}
+
+// 有効期限を指定する
+public interface IExpirable
+{
+    DateTime ExpiresAt { get; set; }
+}
+```
+
+**実装側**
+
+`Announcement`、`BlogPost`、`Customer`は、それぞれ必要なインターフェースだけを実装します。
+
+```cs
+// お知らせ：作成・更新日時、公開開始日時、有効期限を持つ
+public class Announcement : IAuditable, IPublishable, IExpirable
+{
+    // …略（タイトルや本文など）
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime PublishAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+}
+
+// ブログ記事：作成・更新日時と公開開始日時を持つ
+public class BlogPost : IAuditable, IPublishable
+{
+    // …略（タイトルや本文など）
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime PublishAt { get; set; }
+}
+
+// 顧客：作成・更新日時だけを持つ
+public class Customer : IAuditable
+{
+    // …略（氏名など）
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+```
+
+**利用側**
+
+例えば、保存時の共通処理で更新日時を設定する設計が考えられます。そこから更新対象の`IAuditable`を処理すれば、お知らせや顧客を更新する個別の処理では、日時の設定を繰り返し書かずに済みます。次のメソッドは、その共通処理のうち更新日時を設定する部分だけを示したものです。
+
+```cs
+public void SetUpdatedAt(IAuditable entity, DateTime now)
+{
+    entity.UpdatedAt = now;
+}
+```
+
+⭐️あれ、でも共通処理にするとか書くなら、実際にはこんな使い方しないのでは？
+このメソッドは、お知らせ、ブログ記事、顧客のどれでも受け取れます。渡せる型を具体的に示すと、次のようになります。
+
+```cs
+SetUpdatedAt(announcement, now);
+SetUpdatedAt(blogPost, now);
+SetUpdatedAt(customer, now);
+```
+
+次に、`IPublishable`の利用例として、公開開始日時を迎えているかを判定する処理を見てみます。現在日時と公開開始日時を比較するために、具体的なクラスが何かを意識する必要はありません。
+
+```cs
+public bool HasPublicationStarted(IPublishable item, DateTime now)
+{
+    return item.PublishAt <= now;
+}
+```
+
+```cs
+HasPublicationStarted(announcement, now);
+HasPublicationStarted(blogPost, now);
+
+// CustomerクラスはIPublishableを実装していないため、渡すとコンパイルエラー
+// HasPublicationStarted(customer, now);
+```
+
+有効期限を過ぎているかの判定では、`IExpirable`を使います。
+
+```cs
+public bool HasExpired(IExpirable item, DateTime now)
+{
+    return item.ExpiresAt <= now;
+}
+```
+
+```cs
+HasExpired(announcement, now);
+
+// BlogPostクラスとCustomerクラスはIExpirableを実装していないため、渡すとコンパイルエラー
+// HasExpired(blogPost, now);
+// HasExpired(customer, now);
+```
+
+`Announcement`は、更新日時を設定する処理からは`IAuditable`、公開開始日時を判定する処理からは`IPublishable`、期限切れを判定する処理からは`IExpirable`として扱われます。それぞれの利用側は、自分に必要な契約だけを使っています。
+
+`Customer`には公開開始日時や有効期限が不要なので、それらの契約を実装する必要はありません。実装側は、自分に必要な機能や役割を定めたインターフェースだけを選び、それぞれの契約に従ってメンバーを実装します。
+
+**インターフェースを利用しない場合**
+
+各クラスに日時のプロパティを個別に書くだけでも、情報を持たせることはできます。ただし、作成・更新日時を記録したいすべてのクラスに、必要なプロパティを揃えることは開発者が確認しなければなりません。同名のプロパティを持っているだけでは、これらのクラスを`IAuditable`のような共通の型として受け取ることもできません。
+
+`IAuditable`を実装するクラスとして宣言すれば、`CreatedAt`や`UpdatedAt`の実装が欠けている場合はコンパイルエラーになります。必要な役割の契約を選ぶことで、揃えるべきメンバーが明確になり、利用側もその契約で共通に扱えます。
+
+共通の基底クラスを使う方法もありますが、すべての日時をそこへまとめると、Customerクラスにも不要な公開開始日時や有効期限を持たなくてはなりません。役割ごとに基底クラスを分けても、C#のクラスはそれらを複数継承できません。インターフェースなら、各クラスが必要な契約を組み合わせて実装できます。
 
 ### 必要な境界があるときに使う
 
@@ -592,9 +723,9 @@ public void Checkout_注文金額で支払う()
 - どちら側から見た話なのかを意識すると、インターフェースの説明を理解しやすくなる
 -->
 
-## 参考にした実装
+## 参考にした資料・実装
 
-この記事のサンプルコードを作成するにあたり、ASP.NET Core製のECプラットフォームである[nopCommerce](https://github.com/nopSolutions/nopCommerce)の次の実装を参考にしました。
+この記事の説明とサンプルコードを作成するにあたり、次の資料と実装を参考にしました。
 
+- [classキーワード（C#リファレンス）](https://learn.microsoft.com/ja-jp/dotnet/csharp/language-reference/keywords/class)
 - [`IPaymentMethod`](https://github.com/nopSolutions/nopCommerce/blob/develop/src/Libraries/Nop.Services/Payments/IPaymentMethod.cs)
-- [`IStoreMappingSupported`](https://github.com/nopSolutions/nopCommerce/blob/develop/src/Libraries/Nop.Core/Domain/Stores/IStoreMappingSupported.cs)
