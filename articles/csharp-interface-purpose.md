@@ -217,6 +217,8 @@ public class CheckoutService
 
 たとえば、クレジットカードや銀行振込のほかに、QRコード決済が追加されることになったとします。インターフェースを利用している場合は、`IPaymentMethod`を実装するクラスを新しく用意します。
 
+![IPaymentMethodを実装する支払い方法を追加しても、利用側とインターフェースは変更しない](/images/csharp-interface-purpose/payment-add-implementation.png)
+
 ```cs
 public class QrCodePaymentMethod : IPaymentMethod
 {
@@ -271,6 +273,8 @@ public class QrCodePaymentMethod : IPaymentMethod
 ### 4. 実装を差し替えやすい
 
 インターフェースを利用すると、利用側を変更せずに実装を差し替えやすくなります。ここでは、アップロードされた文書の保存先を例に考えます。開発環境ではローカルへ保存し、本番環境ではAmazon S3へ保存したいとします。
+
+![IStorageServiceの実装を差し替えても、DocumentServiceとインターフェースは変更しない](/images/csharp-interface-purpose/storage-switch-implementation.png)
 
 まず、ファイルを保存するための契約を`IStorageService`として定めます。ローカルへ保存するクラスとS3へ保存するクラスは、どちらもこのインターフェースを実装します。
 
@@ -358,6 +362,8 @@ public class DocumentService
 ### 5. テストしやすい
 
 実装を差し替えやすいことは、テストのしやすさにもつながります。`CheckoutService`をテストするときに、クレジットカード会社のシステムへ接続して実際の決済を行うわけにはいきません。そこで、実際の決済を行わないテスト用の実装を用意します。
+
+![IPaymentMethodの本番用実装をテスト用実装へ差し替えても、CheckoutServiceとインターフェースは変更しない](/images/csharp-interface-purpose/payment-test-implementation.png)
 
 実際の開発では、Moqなどのモックライブラリにインターフェースを指定し、その契約を満たすテスト用オブジェクトを作ることも一般的です。ここでは、実装を差し替えていることが分かりやすいように`FakePaymentMethod`を手書きします。
 
