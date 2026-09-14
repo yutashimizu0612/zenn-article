@@ -503,6 +503,8 @@ public interface IExpirable
 
 `Announcement`、`BlogPost`、`Customer`は、それぞれ必要なインターフェースだけを実装します。
 
+![Announcement、BlogPost、Customerが必要なインターフェースだけを組み合わせて実装する関係](/images/csharp-interface-purpose/interface-role-combination.png)
+
 ```cs
 // お知らせ：作成・更新日時、公開開始日時、有効期限を持つ
 public class Announcement : IAuditable, IPublishable, IExpirable
