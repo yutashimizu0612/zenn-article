@@ -322,13 +322,15 @@ public void Checkout(decimal orderTotal, PaymentType paymentType)
 
 ### 4. 利用側を変更せずに実装を差し替えられる
 
-利用側が具象クラスではなくインターフェースだけに依存していれば、具象クラスを変更しても利用側を修正する必要はありません。そのため、同じインターフェースを実装するクラスを、必要に応じて差し替えられます。
+利用側が具象クラスではなくインターフェースだけに依存することで得られるメリットの一つが、実装を差し替えやすくなることです。同じインターフェースを実装するクラスであれば、利用側を変更せずに入れ替えられます。
 
-実装を差し替える例として、アップロードされた文書の保存先を取り上げます。開発環境ではローカルへ保存し、本番環境ではAmazon S3へ保存したいとします。
+実装を差し替える例として、アップロードされた文書の保存先を取り上げます。この例では、開発環境ではローカルへ保存し、本番環境ではAmazon S3へ保存するとします。
 
 ![IStorageServiceの実装を差し替えても、DocumentServiceとインターフェースは変更しない](/images/csharp-interface-purpose/storage-switch-implementation.png)
 
-まず、ファイルを保存するための契約を`IStorageService`として定めます。ローカルへ保存するクラスとS3へ保存するクラスは、どちらもこのインターフェースを実装します。
+まず、ファイルを保存するための契約を`IStorageService`として定めます。
+
+ローカルへ保存するクラスとS3へ保存するクラスは、どちらもこのインターフェースを実装します。
 
 ```cs
 // インターフェース: ファイルを保存するための操作を定める
@@ -356,7 +358,9 @@ public class S3StorageService : IStorageService
 }
 ```
 
-次に、この保存機能を利用するクラスとして、文書を扱う`DocumentService`を用意します。`DocumentService`は、具体的な保存先ではなく`IStorageService`に依存します。
+次に、この保存機能を利用するクラスとして、文書を扱う`DocumentService`を用意します。
+
+`DocumentService`は、Amazon S3といった具体的な保存先ではなく`IStorageService`に依存させます。
 
 ```cs
 public class DocumentService
@@ -377,7 +381,7 @@ public class DocumentService
 
 `DocumentService`が知っているのは、`Save()`を呼び出せばファイルを保存できるという契約だけです。実際にローカルへ保存するのか、S3へ保存するのかは知りません。
 
-そのため、`DocumentService`へ渡す具象クラスを変えるだけで、保存先を切り替えられます。
+そのため、必要に応じて`DocumentService`へ渡す具象クラスを変えるだけで、保存先を切り替えられます。
 
 ```diff cs
 -IStorageService storageService = new LocalStorageService();
@@ -385,7 +389,9 @@ public class DocumentService
  DocumentService documentService = new DocumentService(storageService);
 ```
 
-差し替える前後のクラスは、どちらも`IStorageService`の契約を満たしています。`DocumentService`が依存する契約は変わらないため、`DocumentService`自体を修正する必要はありません。将来、保存先をAzure Blob Storageへ変更するといった場合も、`IStorageService`を実装する新しい具象クラスを用意すれば、利用側の`DocumentService`には変更を入れずに保存先を切り替えられます。
+`LocalStorageService`と`S3StorageService`は、どちらも`IStorageService`の契約通りに実装がされています。`DocumentService`が依存する先は`IStorageService`のまま変わらないため、`DocumentService`自体を修正する必要はありません。
+
+将来、保存先をAzure Blob Storageへ変更するといった場合も、`IStorageService`を実装する新しい具象クラスを用意すれば、利用側の`DocumentService`には変更を入れずに保存先を切り替えられます。
 
 **インターフェースを利用しない場合**
 
@@ -394,6 +400,7 @@ public class DocumentService
 ```cs
 public class DocumentService
 {
+    // IStorageServiceではなく、具象クラスのLocalStorageServiceに直接依存してしまっている
     private readonly LocalStorageService _storageService;
 
     public DocumentService(LocalStorageService storageService)
@@ -408,23 +415,31 @@ public class DocumentService
 }
 ```
 
-保存先をS3へ変更するには、`DocumentService`が依存する型を`S3StorageService`へ書き換えなければなりません。保存先をローカルからS3へ変更しただけなのに、本来その実装詳細を意識する必要のない利用側の`DocumentService`にまで修正が及んでしまいます。
+このコードでは、`DocumentService`が`LocalStorageService`という具象クラスに直接依存しています。
 
-利用側が`LocalStorageService`や`S3StorageService`といった具象クラスではなく、`IStorageService`だけに依存していれば、利用側のコードは変わりません。実装の選択は`DocumentService`の外側で行うため、保存先を切り替えるための処理が、保存機能を利用するコードの各所に散らばることもありません。
+そのため、保存先をS3へ変更するには、依存する型を`S3StorageService`へ書き換えなければなりません。本来は保存先という実装詳細を意識する必要がない利用側の`DocumentService`にまで、修正が及んでしまいます。
 
-同じ考え方は、開発環境ではコンソール、本番環境では外部のログ監視サービスへログを出力する場合にも使えます。また、外部APIへ接続するクラスを、テスト時だけモックへ差し替えることもできます。このように、環境ごとに処理を使い分ける場合や、利用する外部サービスを変更する場合にも、インターフェースが役立ちます。
+利用側が`LocalStorageService`や`S3StorageService`といった具象クラスではなく、`IStorageService`だけに依存していれば、利用側のコードは変わりません。
+
+`LocalStorageService`と`S3StorageService`のどちらの実装を使うかの選択は`DocumentService`の外側で行うため、保存先を切り替えるための処理が、保存機能を利用するコードの各所に散らばることもありません。
+
+同じ考え方は、開発環境ではコンソール、本番環境では外部のログ監視サービスへログを出力する場合にも使えます。また、外部APIへ接続するクラスを、テスト時だけモックへ差し替えることもできます。
+
+このように、環境ごとに処理を使い分ける場合や、利用する外部サービスを変更する場合にも、インターフェースが役立ちます。
 
 ### 5. テストしやすい
 
 利用側を変更せずに実装を差し替えられることは、テストのしやすさにもつながります。
 
-ここでは、最初に取り上げた支払い処理の例に戻り、`CheckoutService`をテストします。
+ここでは、最初に取り上げた支払い処理のサンプルに戻り、`CheckoutService`をテストする例を取り上げます。
 
 テストのたびにクレジットカード会社のシステムへ接続し、実際の決済を行うわけにはいきません。そこで、`IPaymentMethod`の本番用実装を、実際の決済を行わないテスト用実装へ差し替えます。
 
 ![IPaymentMethodの本番用実装をテスト用実装へ差し替えても、CheckoutServiceとインターフェースは変更しない](/images/csharp-interface-purpose/payment-test-implementation.png)
 
-実際の開発では、Moqなどのモックライブラリにインターフェースを指定し、その契約を満たすテスト用オブジェクトを作ることも一般的です。ここでは、実装を差し替えていることが分かりやすいように`FakePaymentMethod`を手書きします。
+実際の開発では、Moqなどのモックライブラリにインターフェースを指定し、その契約を満たすテスト用オブジェクトを作ることが一般的だと思います。
+
+ここでは、実装を差し替えていることが分かりやすいように`FakePaymentMethod`を手書きしています。
 
 ```cs
 public class FakePaymentMethod : IPaymentMethod
@@ -438,7 +453,9 @@ public class FakePaymentMethod : IPaymentMethod
 }
 ```
 
-`FakePaymentMethod`は`IPaymentMethod`の契約を満たしています。`CheckoutService`は`CreditCardPaymentMethod`などの具象クラスではなく`IPaymentMethod`に依存しているため、本番用の実装と同じように、このテスト用の実装を渡せます。
+`FakePaymentMethod`は`IPaymentMethod`の契約を満たしています。
+
+`CheckoutService`は`CreditCardPaymentMethod`などの具象クラスではなく`IPaymentMethod`に依存しているため、本番用の実装と同じように、テスト用の実装である`FakePaymentMethod`を渡せます。
 
 ```cs
 [Fact]
@@ -454,17 +471,21 @@ public void Checkout_注文金額で支払う()
 }
 ```
 
-本番用の実装をテスト用の実装へ差し替えられるため、外部のシステムやネットワークの状態に左右されず、`CheckoutService`の処理だけをテストできます。
+本番用の実装をテスト用の実装へ差し替えられるため、外部のシステムに左右されず、`CheckoutService`の処理だけをテストできます。
 
 **インターフェースを利用しない場合**
 
-`CheckoutService`が具象クラスへ直接依存している場合、クレジットカード支払いの経路をテストするにも、本物の`CreditCardPaymentMethod`を使うことになります。すると、`Pay()`から外部通信へ処理が進みます。
+`CheckoutService`が具象クラスへ直接依存している場合、`CheckoutService`の処理だけをテストしたくても、本物の`CreditCardPaymentMethod`を使うことになります。
+
+すると、`Pay()`から外部通信へ処理が進みます。
 
 設定や認証情報がなく途中でエラーになるかもしれませんし、実際に外部へ通信してしまうかもしれません。いずれにしても、このままテストを実行するのは適切ではありません。
 
-本来は、先ほど用意した`FakePaymentMethod`を渡すか、`IPaymentMethod`をもとにモックライブラリで作ったテスト用オブジェクトへ差し替えたいところです。しかし、`CheckoutService`が要求しているのは`CreditCardPaymentMethod`です。両者は異なる型なので、`FakePaymentMethod`を渡すことはできません。
+本来は、先ほど用意した`FakePaymentMethod`を渡すか、`IPaymentMethod`をもとにモックライブラリで作ったテスト用オブジェクトへ差し替えたいところです。
 
-つまり、`IPaymentMethod`という共通の差し込み口がないため、この`FakePaymentMethod`へ差し替えて`CheckoutService`だけを単体テストすることはできません。
+しかし、`CheckoutService`が要求しているのは`CreditCardPaymentMethod`です。両者は異なる型なので、`FakePaymentMethod`を渡すことはできません。
+
+つまり、`IPaymentMethod`という共通の差し込み口がないため、この`FakePaymentMethod`へ差し替えて`CheckoutService`だけを単体テストすることができません。
 
 ### 6. 異なる型に共通の役割を持たせられる
 
@@ -474,40 +495,46 @@ C#では、一つのクラスが複数のクラスを継承することはでき
 
 例として、お知らせ、ブログ記事、顧客の情報を管理するアプリケーションを考えてみます。
 
-いずれも作成・更新日時を記録しますが、お知らせとブログ記事には予約公開のための公開開始日時も必要です。さらに、お知らせには掲載を終了する有効期限も設定するものとします。
-
-お知らせ、ブログ記事、顧客は、それぞれ異なる目的を持つ別のクラスです。しかし、日時を記録する処理から見ると、いずれも「作成・更新日時を記録する対象」という共通の役割を持っています。
-
-その役割を`IAuditable`として表します。公開開始日時と有効期限についても別々の契約として定義し、それぞれを必要とするクラスが実装します。
+![Announcement、BlogPost、Customerが必要なインターフェースだけを組み合わせて実装する関係](/images/csharp-interface-purpose/interface-role-combination.png)
 
 **インターフェース側**
 
+この例では、「作成・更新日時を記録する対象」「公開できる対象」「有効期限を設定できる対象」という三つの役割を、それぞれ別のインターフェースとして定めます。
+
 ```cs
-// 作成・更新日時を記録する
+// ※ サンプルを簡潔にするため、各役割に必要なメンバーを日時のプロパティだけに絞っています
+
+// 作成・更新日時を記録する対象
 public interface IAuditable
 {
     DateTime CreatedAt { get; set; }
     DateTime UpdatedAt { get; set; }
 }
 
-// 公開開始日時を指定する
+// 公開できる対象
 public interface IPublishable
 {
     DateTime PublishAt { get; set; }
 }
 
-// 有効期限を指定する
+// 有効期限を設定できる対象
 public interface IExpirable
 {
     DateTime ExpiresAt { get; set; }
 }
 ```
 
+お知らせ、ブログ記事、顧客は、それぞれ異なる目的を持つ別のクラスです。
+
+しかし、日時を記録する処理から見ると、いずれも「作成・更新日時を記録する対象」という共通の役割を持っています。
+
+その役割を表すのが`IAuditable`です。
+
 **実装側**
 
-`Announcement`、`BlogPost`、`Customer`は、それぞれ必要なインターフェースだけを実装します。
+いずれも`IAuditable`を実装しますが、お知らせとブログ記事だけが、予約公開に必要な`IPublishable`も実装します。さらに、お知らせは、掲載を終了する有効期限を持つため`IExpirable`も実装します。
 
-![Announcement、BlogPost、Customerが必要なインターフェースだけを組み合わせて実装する関係](/images/csharp-interface-purpose/interface-role-combination.png)
+このように、`Announcement`、`BlogPost`、`Customer`は、それぞれ必要なインターフェースだけを組み合わせます。
 
 ```cs
 // お知らせ：作成・更新日時、公開開始日時、有効期限を持つ
@@ -592,21 +619,25 @@ HasExpired(announcement, now);
 // HasExpired(customer, now);
 ```
 
-`Announcement`は、更新日時を設定する処理からは`IAuditable`、公開開始日時を判定する処理からは`IPublishable`、期限切れを判定する処理からは`IExpirable`として扱われます。それぞれの利用側は、自分に必要な契約だけを使っています。
+`Announcement`は、更新日時を設定する処理からは`IAuditable`、公開開始日時を判定する処理からは`IPublishable`、期限切れを判定する処理からは`IExpirable`として扱われます。
 
-`Customer`には公開開始日時や有効期限が不要なので、それらの契約を実装する必要はありません。実装側は、自分に必要な機能や役割を定めたインターフェースだけを選び、それぞれの契約に従ってメンバーを実装します。
+それぞれの利用側のクラスは、自分に必要な契約だけを使っています。例えば、`Customer`には公開開始日時や有効期限が不要なので、それらの契約を実装する必要はありません。
+
+実装側は、自分に必要な機能や役割を定めたインターフェースだけを選び、それぞれの契約に従ってメンバーを実装します。
 
 **インターフェースを利用しない場合**
 
-各クラスに日時のプロパティを個別に書くだけでも、必要な情報を持たせることはできます。ただし、作成・更新日時を記録したいすべてのクラスに必要なプロパティが揃っているかは、開発者が確認しなければなりません。
+各クラスに日時のプロパティを個別に書くだけでも、必要な情報を持たせることはできます。
 
-また、複数のクラスが同名のプロパティを持っているだけでは、それらを`IAuditable`のような共通の型として受け取ることもできません。
+ただし、作成・更新日時を記録したいすべてのクラスに必要なプロパティが揃っているかは、開発者が確認しなければなりません。また、複数のクラスが同名のプロパティを持っているだけでは、それらを`IAuditable`のような共通の型として受け取ることもできません。
 
 `IAuditable`を実装するクラスとして宣言すれば、`CreatedAt`や`UpdatedAt`の実装が欠けている場合はコンパイルエラーになります。必要な役割の契約を選ぶことで、揃えるべきメンバーが明確になり、利用側もその契約で共通に扱えます。
 
-共通の基底クラスを使う方法もありますが、すべての日時をそこへまとめると、`Customer`にも不要な公開開始日時や有効期限を持たせることになります。
+共通の基底クラスを使う方法もありますが、すべての日時を共通の基底クラスにまとめると、各クラスに不要な実装を強いることになってしまいます。例えば、`Customer`にも不要な公開開始日時や有効期限を持たせることになります。
 
-仮にこの役割ごとに基底クラスを分けても、C#のクラスはそれらを複数継承できません。インターフェースなら、各クラスが必要な契約を組み合わせて実装できます。
+では、役割ごとに基底クラスを分け、各クラスに必要な基底クラスだけを継承させればよいのでしょうか。しかし、C#では一つのクラスが複数のクラスを継承することはできません。
+
+役割ごとに分けた契約を必要な分だけ組み合わせるには、複数実装できるインターフェースを使います。
 
 ## おわりに
 
