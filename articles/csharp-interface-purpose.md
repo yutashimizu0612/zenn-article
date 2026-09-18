@@ -120,9 +120,9 @@ public void NotifyCompletion(INotifier notifier)
 :::message
 ここから紹介するメリットの多くは、インターフェースだけに固有のものではありません。利用側が抽象クラスに依存する場合にも、同様の効果を得られます。
 
-また、この記事のサンプルは、インターフェースとそれを実装する具象クラスを同一のアプリケーション内で管理し、同時に変更できる状況を想定しています。外部の開発者が実装する公開ライブラリでは、インターフェースの変更が既存の実装を壊す可能性があるため、APIの互換性という別の観点が必要になり、抽象クラスの方が適している場合もあります。
+また、この記事では、公開ライブラリではなく、インターフェースとそれを実装する具象クラスを同一のアプリケーション内で管理し、同時に変更できるアプリケーション開発を想定しています。一方、利用者によるインターフェースの実装を許す公開ライブラリでは、その実装はライブラリの提供者の管理外にあります。公開済みのインターフェースに実装必須のメンバーを追加すると、利用者側の既存実装はコンパイルできなくなります。そのため、公開後の互換性を維持する観点から、抽象クラスの方が適している場合もあります。
 
-この記事では、こういったインターフェースと抽象クラスの使い分けには踏み込まず、インターフェースを利用することで得られる効果に焦点を当てます。
+この記事では、こういったインターフェースと抽象クラスの使い分けには踏み込まず、前述のようなアプリケーション開発において、インターフェースを利用することで得られる効果に焦点を当てます。
 :::
 
 ### 1. ポリモーフィズムによって利用側の条件分岐をなくせる
@@ -271,22 +271,44 @@ public class QrCodePaymentMethod : IPaymentMethod
 利用側が支払い方法ごとの条件分岐を持っている場合、QRコード決済を追加するには、その条件分岐にも処理を追加する必要があります。
 
 ```diff cs
- public void Checkout(decimal orderTotal, PaymentType paymentType)
+ public class CheckoutService
  {
-     // 在庫の確認や注文データの作成（処理は省略）
+     private readonly CreditCardPaymentMethod _creditCardPaymentMethod;
+     private readonly BankTransferPaymentMethod _bankTransferPaymentMethod;
++    private readonly QrCodePaymentMethod _qrCodePaymentMethod;
 
-     if (paymentType == PaymentType.CreditCard)
-         _creditCardPaymentMethod.Pay(orderTotal);
-     else if (paymentType == PaymentType.BankTransfer)
-         _bankTransferPaymentMethod.Pay(orderTotal);
-+    else if (paymentType == PaymentType.QrCode)
-+        _qrCodePaymentMethod.Pay(orderTotal);
+     public CheckoutService(
+         CreditCardPaymentMethod creditCardPaymentMethod,
+-        BankTransferPaymentMethod bankTransferPaymentMethod)
++        BankTransferPaymentMethod bankTransferPaymentMethod,
++        QrCodePaymentMethod qrCodePaymentMethod)
+     {
+         _creditCardPaymentMethod = creditCardPaymentMethod;
+         _bankTransferPaymentMethod = bankTransferPaymentMethod;
++        _qrCodePaymentMethod = qrCodePaymentMethod;
+     }
 
-     // 注文の確定（処理は省略）
+     public void Checkout(decimal orderTotal, PaymentType paymentType)
+     {
+         // 在庫の確認や注文データの作成（処理は省略）
+
+         if (paymentType == PaymentType.CreditCard)
+             _creditCardPaymentMethod.Pay(orderTotal);
+         else if (paymentType == PaymentType.BankTransfer)
+             _bankTransferPaymentMethod.Pay(orderTotal);
++        else if (paymentType == PaymentType.QrCode)
++            _qrCodePaymentMethod.Pay(orderTotal);
+
+         // 注文の確定（処理は省略）
+     }
  }
 ```
 
-新しい支払い方法を追加するたびに利用側も変更することになり、変更箇所が広がりやすくなります。同じような支払い方法による条件分岐が複数箇所にあれば、そのすべてへQRコード決済の分岐を追加しなければなりません。また、既存のソースコードの修正が必要なため、誤ってクレジットカード決済や銀行振込の処理に影響を与える可能性もあります。
+新しい支払い方法を追加するたびに、利用側のフィールド、コンストラクタ、条件分岐を変更することになります。
+
+コンストラクタのシグネチャも変わるため、`CheckoutService`を生成している箇所では、新たに`QrCodePaymentMethod`を渡さなければなりません。同じような支払い方法による条件分岐が複数箇所にあれば、そのすべてへQRコード決済の分岐を追加する必要もあります。
+
+このように変更箇所が広がり、既存のコードを修正する過程で、誤ってクレジットカード決済や銀行振込の処理に影響を与える可能性もあります。
 
 `CheckoutService`のように支払い処理を実行する側が`IPaymentMethod`に依存していれば、新しい支払い方法を追加しても、そのコードを変更する必要はありません。変更が支払い処理を利用する各所へ広がらないため、新しい実装を追加しやすくなります。
 
@@ -485,15 +507,15 @@ public void Checkout_注文金額で支払う()
 
 **インターフェースを利用しない場合**
 
-`CheckoutService`が具象クラスへ直接依存している場合、`CheckoutService`の処理だけをテストしたくても、本物の`CreditCardPaymentMethod`を使うことになります。
+`CheckoutService`は、コンストラクタで`CreditCardPaymentMethod`と`BankTransferPaymentMethod`を要求し、`Checkout()`へ渡された`PaymentType`に応じて両者を呼び分けます。
 
-すると、`Pay()`から外部通信へ処理が進みます。
+クレジットカード決済だけをテストする場合でも、二つの具象クラスを渡す必要があります。そのため、テストでもプロダクションコードと同じ支払い処理が実行されます。
 
-設定や認証情報がなく途中でエラーになるかもしれませんし、実際に外部へ通信してしまうかもしれません。いずれにしても、このままテストを実行するのは適切ではありません。
+支払い処理が外部通信を伴う場合、設定や認証情報がなく途中でエラーになるかもしれませんし、実際に外部へ通信してしまうかもしれません。いずれにしても、このままテストを実行するのは適切ではありません。
 
 本来は、先ほど用意した`FakePaymentMethod`を渡すか、`IPaymentMethod`をもとにモックライブラリで作ったテスト用オブジェクトへ差し替えたいところです。
 
-しかし、`CheckoutService`が要求しているのは`CreditCardPaymentMethod`です。両者は異なる型なので、`FakePaymentMethod`を渡すことはできません。
+しかし、`CheckoutService`が要求しているのは、`CreditCardPaymentMethod`と`BankTransferPaymentMethod`という具象クラスです。`FakePaymentMethod`はどちらとも異なる型なので、代わりに渡すことはできません。
 
 つまり、`IPaymentMethod`という共通の差し込み口がないため、この`FakePaymentMethod`へ差し替えて`CheckoutService`だけを単体テストすることができません。
 
