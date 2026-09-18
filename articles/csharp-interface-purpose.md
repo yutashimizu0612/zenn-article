@@ -144,6 +144,12 @@ public void NotifyCompletion(INotifier notifier)
 しかし、インターフェースを用意せず、`CheckoutService`が支払い方法の具象クラスを直接利用する場合、`CheckoutService`自身が適切な支払い方法を判定・選択し、それぞれの具象クラスを呼び分けることになってしまいます。
 
 ```cs
+public enum PaymentType
+{
+    CreditCard,
+    BankTransfer
+}
+
 public class CheckoutService
 {
     private readonly CreditCardPaymentMethod _creditCardPaymentMethod;
@@ -240,7 +246,7 @@ public class CheckoutService
 
 `CheckoutService`は、実際の支払い方法がクレジットカードなのか銀行振込なのかを判定せず、`Pay()`を呼び出すだけです。`_paymentMethod`の実体が`CreditCardPaymentMethod`ならクレジットカードによる支払い処理が、`BankTransferPaymentMethod`なら銀行振込による支払い処理が実行されます。
 
-このように、同じメソッドを呼び出しても、そのメソッドを呼び出すオブジェクトの種類によって異なる動作をする仕組みをポリモーフィズムと呼びます。
+このように、同じメソッドを呼び出しても、メソッドを呼び出された側のオブジェクトの実際の型によって異なる動作をする仕組みをポリモーフィズムと呼びます。
 
 `IPaymentMethod`インターフェースを導入したことで、`CheckoutService`から支払い方法ごとの条件分岐がなくなり、`CheckoutService`が依存するのは`IPaymentMethod`だけになりました。アプリケーション内のほかの場所で支払い処理を呼び出す場合も、支払い方法を`IPaymentMethod`として受け取るようにすれば、同じような条件分岐がアプリ内のあちこちに増えていくことを防げます。
 
@@ -275,6 +281,14 @@ public class QrCodePaymentMethod : IPaymentMethod
 利用側が支払い方法ごとの条件分岐を持っている場合、QRコード決済を追加するには、その条件分岐にも処理を追加する必要があります。
 
 ```diff cs
+ public enum PaymentType
+ {
+     CreditCard,
+-    BankTransfer
++    BankTransfer,
++    QrCode
+ }
+
  public class CheckoutService
  {
      private readonly CreditCardPaymentMethod _creditCardPaymentMethod;
@@ -336,7 +350,7 @@ public class QrCodePaymentMethod : IPaymentMethod
 
 一方、インターフェースを利用せず、利用側が支払い方法ごとの条件分岐を持つ場合はどうなるでしょうか。
 
-当たり前のことではありますが、コンパイラは、既存のコードにQRコード決済の条件分岐を書き忘れたことを検出できません。
+if文による分岐の場合、コンパイラは、既存のコードにQRコード決済の条件分岐を書き忘れたことを検出できません。
 
 ```cs
 public void Checkout(decimal orderTotal, PaymentType paymentType)
@@ -659,9 +673,9 @@ HasExpired(announcement, now);
 
 `Announcement`は、更新日時を設定する処理からは`IAuditable`、公開開始日時を判定する処理からは`IPublishable`、期限切れを判定する処理からは`IExpirable`として扱われます。
 
-それぞれの利用側のクラスは、自分に必要な契約だけを使っています。例えば、`Customer`には公開開始日時や有効期限が不要なので、それらの契約を実装する必要はありません。
+それぞれの利用側は、自分に必要な契約だけを使っています。例えば、`HasPublicationStarted()`は公開開始日時の判定に必要な`IPublishable`だけを受け取り、`IAuditable`や`IExpirable`には依存しません。
 
-実装側は、自分に必要な機能や役割を定めたインターフェースだけを選び、それぞれの契約に従ってメンバーを実装します。
+一方、実装側は、自分に必要な機能や役割を定めたインターフェースだけを選び、それぞれの契約に従ってメンバーを実装します。例えば、`Customer`には公開開始日時や有効期限が不要なので、それらの契約を実装する必要はありません。
 
 **インターフェースを利用しない場合**
 
@@ -694,7 +708,7 @@ HasExpired(announcement, now);
 この記事の説明とサンプルコードを作成するにあたり、次の資料と実装を参考にしました。
 
 - Krzysztof Cwalina、Jeremy Barton、Brad Abrams『.NETのクラスライブラリ設計 改訂新版　開発チーム直伝の設計原則、コーディング標準、パターン』
-- [インターフェイスの設計（Framework Design Guidelines）](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/interface)
+- [インターフェイスの設計（Framework Design Guidelines）](https://learn.microsoft.com/ja-jp/dotnet/standard/design-guidelines/interface)
 - [.NETの依存関係の挿入](https://learn.microsoft.com/ja-jp/dotnet/core/extensions/dependency-injection/overview)
 - [ASP.NET Coreのファイルプロバイダー](https://learn.microsoft.com/ja-jp/aspnet/core/fundamentals/file-providers)
 - [ASP.NET Coreの分散キャッシュ](https://learn.microsoft.com/ja-jp/aspnet/core/performance/caching/distributed)
