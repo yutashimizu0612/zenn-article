@@ -332,43 +332,74 @@ public class QrCodePaymentMethod : IPaymentMethod
 
 ### 3. 実装漏れをコンパイルエラーで防げる
 
-前節では、`IPaymentMethod`を実装する`QrCodePaymentMethod`を追加しました。
+前節では、`IPaymentMethod`を実装する`QrCodePaymentMethod`を追加し、支払い方法が3種類になりました。
 
-このとき、インターフェースに定められた`Pay()`を実装し忘れると、コンパイルエラーになります。インターフェースを実装するクラスには、定められたメンバーの実装が強制されるためです。
+今度は、支払いだけでなく返金にも対応することになったとします。返金は、クレジットカード、銀行振込、QRコード決済のすべてで必要な操作です。つまり、3つの具象クラスすべてに返金処理を追加しなければなりません。
+
+インターフェースを利用している場合、まず`IPaymentMethod`に返金のためのメソッド`Refund()`を追加します。
 
 ```cs
 public interface IPaymentMethod
 {
     void Pay(decimal amount);
-}
-
-// Pay()を実装していないため、コンパイルエラーになる
-public class QrCodePaymentMethod : IPaymentMethod
-{
+    void Refund(decimal amount); // 追加
 }
 ```
 
-一方、インターフェースを利用せず、利用側が支払い方法ごとの条件分岐を持つ場合はどうなるでしょうか。
-
-if文による分岐の場合、コンパイラは、既存のコードにQRコード決済の条件分岐を書き忘れたことを検出できません。
+この時点で、`IPaymentMethod`を実装する`CreditCardPaymentMethod`、`BankTransferPaymentMethod`、`QrCodePaymentMethod`は、いずれも`Refund()`を実装していないため、3クラスすべてがコンパイルエラーになります。インターフェースを実装するクラスには、定められたメンバーの実装が強制されるためです。
 
 ```cs
-public void Checkout(decimal orderTotal, PaymentType paymentType)
+// Refund()を実装していないため、コンパイルエラーになる
+public class CreditCardPaymentMethod : IPaymentMethod
 {
-    if (paymentType == PaymentType.CreditCard)
-        _creditCardPaymentMethod.Pay(orderTotal);
-    else if (paymentType == PaymentType.BankTransfer)
-        _bankTransferPaymentMethod.Pay(orderTotal);
-
-    // QRコード決済の分岐がなくてもコンパイルは通る
+    public void Pay(decimal amount)
+    {
+        // クレジットカードによる支払い処理
+    }
 }
 ```
 
-つまり、新しい支払い方法を追加するたびに、開発者がすべての条件分岐を探して修正する必要があります。ある分岐箇所への追加を忘れても、既存のコードはコンパイルできてしまうため、コンパイラは修正漏れを検出できません。実際のアプリケーションで分岐が増えるほど、修正箇所を把握して漏れなく対応するのは難しくなります。
+コンパイラは「どのクラスに返金処理が足りないか」を一覧で示してくれます。3クラスすべてに`Refund()`を実装するまでビルドは通らないため、どれか一つのクラスで返金処理を書き忘れたまま先へ進むことはありません。
 
-インターフェースを利用すると、`CheckoutService`のように支払い処理を実行する側から、支払い方法ごとの条件分岐がなくなります。さらに、新しい具象クラスには`IPaymentMethod`の実装が強制されるため、必要な`Pay()`を実装し忘れればコンパイルエラーになります。
+新しい具象クラスを追加するときも同じです。`IPaymentMethod`を実装すると宣言したクラスが`Pay()`や`Refund()`を持っていなければ、その場でコンパイルエラーになります。
 
-人がすべての条件分岐を探して修正するのではなく、新しい具象クラスが契約を満たしているかをコンパイラに検査させられるため、実装漏れを仕組みとして防ぎやすくなります。
+この効果は、大人数で開発している場合や、仕様変更で契約に操作を追加する場合に特に大きくなります。実装クラスを誰が追加しても、契約を誰が変更しても、契約から外れた実装があればビルドが通りません。`Refund()`というメンバーの実装漏れを、コンパイルの時点で見つけられます。
+
+**インターフェースを利用しない場合**
+
+一方、インターフェースを利用せず、`CheckoutService`が具象クラスを直接呼び分けている場合はどうなるでしょうか。
+
+返金に対応するため、まず`CreditCardPaymentMethod`に`Refund()`を追加したとします。
+
+```cs
+public class CreditCardPaymentMethod
+{
+    public void Pay(decimal amount)
+    {
+        // クレジットカードによる支払い処理
+    }
+
+    public void Refund(decimal amount) // 追加
+    {
+        // クレジットカードによる返金処理
+    }
+}
+
+// Refund()がなくてもコンパイルは通る
+public class BankTransferPaymentMethod
+{
+    public void Pay(decimal amount)
+    {
+        // 銀行振込による支払い処理
+    }
+}
+```
+
+`BankTransferPaymentMethod`と`QrCodePaymentMethod`にも同じ`Refund()`が必要ですが、そのことはコードのどこにも書かれていません。3つのクラスは、たまたま同じ名前の`Pay()`を持っているだけの、互いに無関係なクラスだからです。そのため、`BankTransferPaymentMethod`に`Refund()`がなくてもコンパイルは通ります。
+
+この不足に気づくのは、返金処理を行う利用側に`_bankTransferPaymentMethod.Refund()`という呼び出しを書いたときです。呼び出しを書くまでは、どのクラスに返金処理が揃っていないかを開発者が自分で確認するしかありません。支払い方法のクラスが増えるほど、揃えるべきクラスを漏れなく把握するのは難しくなります。
+
+インターフェースは、実装側から見ると「提供しなければならない操作の一覧」でした。その一覧に操作を追加すれば、すべての実装クラスがその一覧を満たしているかをコンパイラが検査します。人が具象クラスを一つずつ確認するのではなく、契約を満たしているかをコンパイラに検査させられるため、実装漏れを仕組みとして防げます。
 
 ### 4. 利用側を変更せずに実装を差し替えられる
 
